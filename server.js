@@ -1,10 +1,12 @@
-require('dotenv');
+require('dotenv').config({
+    path: './config.env'
+});
 const express = require('express');
 const app = express();
 const cors = require('cors')();
 const faunadb = require('faunadb');
 const client = new faunadb.Client({
-    secret: 'fnAFAEYjnVACWXyokieN2gi_GzonhZprABBZQDKo'
+    secret: process.env.FAUNADB_SECRET_KEY,
 });
 
 // FQL functions
@@ -34,6 +36,41 @@ app.get('/todos', async (req, res) => {
     }
 });
 
+//retrieve all completed todos
+app.get('/todos/completed_todos', async (req, res) => {
+    try {
+        const getTodos = await client.query(
+            q.Map(
+                q.Paginate(q.Match(q.Index('completed_todo'), true)),
+                q.Lambda('X', q.Get(q.Var('X')))
+            )
+        );
+
+        res.status(200).json({
+            success: true,
+            data: getTodos
+        })
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+//retrieve all todos sorted by date
+app.get('/todos/sorted', async (req, res) => {
+    try {
+        const getSortedTodos = await client.query(
+            q.Paginate(q.Match(q.Index('todos_by_date_desc')))
+        );
+
+        res.status(200).json({
+            success: true,
+            data: getSortedTodos
+        })
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 //retrieve a single todo by specifying id
 app.get('/todos/:id', async (req, res) => {
     try {
@@ -56,14 +93,18 @@ app.get('/todos/:id', async (req, res) => {
 //create a todo
 app.post('/todos', async (req, res) => {
     try {
-        const { title, description } = req.body;
+        const { title, description, completed } = req.body;
+        //completed is boolean value
 
         if (!title || !description) {
             return res.status(400).json({ error: 'Missing title or description' });
         }
 
+        //save date at which event created
+        const date = new Date().toISOString();
+
         const { data } = await client.query(
-            q.Create(q.Collection('todos'), { data: { title, description } })
+            q.Create(q.Collection('todos'), { data: { title, description, completed, date } })
         );
 
         res.status(201).json({
@@ -82,6 +123,10 @@ app.put('/todos/:id', async (req, res) => {
 
         if (!title || !description) {
             return res.status(400).json({ error: 'Missing title or description' });
+        }
+
+        if (!req.params.id) {
+            return res.status(400).json({ error: 'Missing ID' });
         }
 
         const { data } = await client.query(
